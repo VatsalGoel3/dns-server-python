@@ -14,6 +14,7 @@ def main():
     while True:
         try:
             buf, source = udp_socket.recvfrom(512)
+            print(f"Received packet from {source}")
     
             # Building dns header structure
             # ID assigned to query packets
@@ -37,9 +38,22 @@ def main():
             nscount = 0
             arcount = 0
 
-            response = struct.pack("HHHHHH!", packet_id, flags, qdcount, ancount, nscount, arcount)
+            #Printing the header for debugging
+            #print(f"Flags: {flags} ({type(flags)})")
+            #print(f"QDCOUNT: {qdcount} ({type(qdcount)})")
+            #print(f"ANCOUNT: {ancount} ({type(ancount)})")
+            #print(f"NSCOUNT: {nscount} ({type(nscount)})")
+            #print(f"ARCOUNT: {arcount} ({type(arcount)})")
+
+            try:
+                response = struct.pack("!HHHHHH", packet_id, flags, qdcount, ancount, nscount, arcount)
+            except struct.error as e:
+                print(f"Struct packing error: {e}")
+                continue  # Move on to the next iteration without crashing
+
     
             udp_socket.sendto(response, source)
+
         except Exception as e:
             print(f"Error receiving data: {e}")
             break
