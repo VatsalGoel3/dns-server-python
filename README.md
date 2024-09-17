@@ -1,94 +1,227 @@
+```markdown
 # DNS Server Project
 
-This project is an implementation of a DNS server in Python. The DNS server listens for DNS queries, processes them, and sends back a response. It is being developed incrementally, with a focus on understanding the DNS protocol and building out the various features of a functioning DNS server.
+This project is an implementation of a DNS server in Python. The DNS server listens for DNS queries, processes them, and sends back responses. The project is being developed incrementally, with a focus on understanding the DNS protocol and building out the various features of a functioning DNS server.
 
 ## Features Implemented So Far
 
 ### 1. **UDP Socket Setup**
+
 - The server listens on `127.0.0.1` at port `2053` and can receive DNS query packets over UDP.
 
-### 2. **DNS Header Construction**
-- The server constructs a DNS header according to the DNS protocol specifications:
-  - **Packet ID**: A fixed packet identifier (currently set to `1234`).
-  - **Flags**: Various DNS flags such as QR (Query/Response), Opcode, and RCODE are packed into a 16-bit field.
-  - **Question Count (QDCOUNT)**, **Answer Count (ANCOUNT)**, **Name Server Count (NSCOUNT)**, and **Additional Records Count (ARCOUNT)** are all set to `0` for now.
+### 2. **DNS Header and Question Section Handling**
 
-### 3. **Responding to Queries**
-- The server receives a DNS query and responds with a minimal DNS response that includes only the header for now. The query's domain name is extracted, and the response includes the appropriate DNS header and the question section (domain name, type, and class).
+- The server constructs a DNS header according to DNS protocol specifications.
+  - **Packet ID**: Extracted from the query.
+  - **Flags**: Properly set to indicate a standard query response.
+  - **Counts**: `QDCOUNT`, `ANCOUNT`, `NSCOUNT`, and `ARCOUNT` are appropriately set based on the response.
 
-### 4. **Logging**
-- The server logs incoming packets and provides basic debugging output for the DNS header and domain name fields. For example:
-  - **Logs include**: Packet ID, Flags, and extracted domain name from the query.
+- The question section from the query is extracted and included in the response.
+
+### 3. **Answer Section Implementation**
+
+- The server now constructs the Answer section in DNS responses.
+  - Returns IP addresses for known domains based on a static domain-to-IP mapping.
+  - Uses pointer compression in the DNS response for efficient encoding.
+
+### 4. **Handling Unknown Domains**
+
+- If a domain is not found in the mapping:
+  - The server sets the `RCODE` to `3` (Name Error) in the response header.
+  - No Answer section is included in the response.
+
+### 5. **Separate Domain-to-IP Mapping**
+
+- Created a `domain_mappings.py` file to store domain-to-IP mappings separately from the main server code.
+  - Enhances code organization and maintainability.
+
+### 6. **Comprehensive Logging**
+
+- Implemented detailed logging in `main.py` using Python's `logging` module.
+  - Logs incoming queries, responses sent, and any errors encountered.
+  - Helps in debugging and monitoring server operations.
+
+### 7. **Tester Script for Rigorous Testing**
+
+- Developed `tester.py` to rigorously test the DNS server's functionality.
+  - Tests handling of known and unknown domains.
+  - Checks for correct RCODE settings and response structures.
+  - Simulates multiple queries to test server robustness.
+  - The tester code was created with assistance from GPT.
 
 ## How It Works
 
-1. **Socket Binding**: The server opens a UDP socket and binds to `127.0.0.1:2053`.
-2. **Query Processing**: It waits for incoming DNS query packets and processes them in a loop.
-3. **Response Construction**: When a query is received, the server constructs a basic DNS response, which includes:
-   - A **Packet ID** (currently fixed at `1234`).
-   - Flags indicating that the response is a standard query response (`QR = 1`, `Opcode = 0`).
-   - The server responds with only the header and question sections. No answers or additional records are included in the response for now (`QDCOUNT = 1`, `ANCOUNT = 0`, `NSCOUNT = 0`, `ARCOUNT = 0`).
-4. **Logging**: The server logs incoming queries and responses for debugging purposes.
+1. **Server Startup**:
+   - The server initializes a UDP socket and binds to `127.0.0.1:2053`.
+   - Logging is configured to provide detailed output.
 
-## Future Work
+2. **Query Processing**:
+   - The server waits for incoming DNS query packets and processes them in a loop.
+   - When a query is received:
+     - Extracts the domain name from the query.
+     - Logs the received domain name.
 
-1. **Handling Different DNS Record Types**
-   - The next step is to parse and handle different record types, such as:
-     - **A (IPv4)**, **AAAA (IPv6)**, **CNAME (Canonical Name)**, etc.
+3. **Response Construction**:
+   - Checks if the domain name exists in `domain_mappings.py`.
+     - If found:
+       - Constructs the DNS response with the Answer section, including the IP address.
+       - Sets `ANCOUNT` to `1`.
+     - If not found:
+       - Sets `RCODE` to `3` (Name Error).
+       - `ANCOUNT` remains `0`.
+   - Logs the action taken (e.g., domain found, domain not found).
+   - Sends the response back to the client.
 
-2. **Recursive Queries**
-   - Implementing recursive query resolution to forward DNS requests and obtain responses from other DNS servers.
-
-3. **Answer Section**
-   - Adding the ability to respond with proper answers (for example, returning IP addresses for domain name queries in the "Answer" section).
-
-4. **Full DNS Packet Parsing**
-   - Fully parsing the incoming DNS queries to support various sections, such as **additional sections** and **authority records**.
+4. **Logging**:
+   - Throughout the process, the server logs important events and errors.
+   - Logs include timestamps, severity levels, and messages.
 
 ## How to Run
 
-### 1. **Run the DNS Server**
-Make sure you have Python 3 installed. You can start the DNS server with the following command:
+### **Prerequisites**
+
+- Python 3.x installed on your system.
+
+### **Running the DNS Server**
 
 ```bash
-python app/main.py
+python main.py
 ```
 
-### 2. **Test the DNS Server**
-Use `dig` to send a query to your server:
+- The server will start and listen on `127.0.0.1:2053`.
+- Logs will be printed to the console.
+
+### **Testing the DNS Server**
+
+#### **Using the Tester Script**
+
+- Ensure the server is not already running separately, as the tester will start it internally.
+
+```bash
+python tester.py
+```
+
+- The tester script will perform several tests and output the results.
+- It tests both known and unknown domains to verify correct server behavior.
+
+#### **Manual Testing with `dig`**
+
+- You can use the `dig` command to test the server manually.
+
+**For a Known Domain (e.g., `example.com`):**
 
 ```bash
 dig @127.0.0.1 -p 2053 example.com
 ```
 
-The server will respond with a minimal DNS header and question section for now.
+**Expected Output:**
 
-### Project Structure
+- The server should return the IP address specified in `domain_mappings.py` for `example.com`.
 
-- `app/main.py`: The main entry point for the DNS server implementation.
-- `README.md`: This file, describing the project and its current state.
-- `test_dns_server.py`: A test script that sends multiple DNS queries to the server and checks the responses.
+**For an Unknown Domain (e.g., `unknown-domain.com`):**
+
+```bash
+dig @127.0.0.1 -p 2053 unknown-domain.com
+```
+
+**Expected Output:**
+
+- The server should return a response with `status: NXDOMAIN`, indicating the domain does not exist.
+
+## Project Structure
+
+- `main.py`: The main DNS server implementation.
+- `domain_mappings.py`: Contains the domain-to-IP mappings.
+- `tester.py`: Script for testing the DNS server.
+- `README.md`: Project documentation and usage instructions.
 
 ## Example Output
 
-When a query is received, you should see output like the following:
+**Server Console Logs:**
 
-```plaintext
-Received packet from ('127.0.0.1', 53336)
-Received query for the domain: example.com
-Sent DNS response to ('127.0.0.1', 53336)
+```
+2023-09-16 14:30:03,123 - INFO - DNS server is starting...
+2023-09-16 14:30:03,124 - INFO - DNS server is running on 127.0.0.1:2053
+2023-09-16 14:30:03,125 - DEBUG - Received packet from ('127.0.0.1', 59070)
+2023-09-16 14:30:03,126 - DEBUG - Received query for domain: invalid_domain_name
+2023-09-16 14:30:03,127 - WARNING - Domain 'invalid_domain_name' not found in mapping.
+2023-09-16 14:30:03,128 - DEBUG - Response header with RCODE=3 sent for domain 'invalid_domain_name'.
+2023-09-16 14:30:03,129 - DEBUG - Sent response to ('127.0.0.1', 59070)
+```
+
+**Tester Script Output:**
+
+```
+Ran 4 tests in 1.018s
+
+OK
 ```
 
 ## Known Issues
 
-- The server currently only responds with a basic DNS header and doesn't handle full DNS queries yet.
-- Only IPv4 queries (A records) are partially supported, with no recursive queries or additional records.
-- The server doesn't return actual answers (like IP addresses) in the "Answer" section yet.
+- The server currently handles only `A` records (IPv4 addresses).
+- Recursive queries are not supported; the server does not forward requests it cannot answer.
+- Domain names are case-insensitive in the current implementation.
+
+## Future Work
+
+- **Support for Additional Record Types**:
+  - Implement handling of `AAAA` (IPv6), `CNAME`, `MX`, and other DNS record types.
+
+- **Recursive Query Handling**:
+  - Add the ability to forward queries to other DNS servers when the domain is not found locally.
+
+- **Dynamic Domain Loading**:
+  - Implement dynamic reloading of `domain_mappings.py` without restarting the server.
+
+- **Improved Error Handling**:
+  - Enhance exception handling and logging for robustness.
+
+## Contributions
+
+- The tester script (`tester.py`) was developed with assistance from OpenAI GPT to ensure comprehensive testing of the DNS server.
 
 ---
 
-### Changes Made:
-- **Updated "Features Implemented So Far"** to reflect the current state of the project, including DNS header construction and query logging.
-- **Added Detailed Instructions** on how to run and test the DNS server.
-- **Structured the Future Work Section** to outline the next stages of development (DNS record types, recursive queries, etc.).
-- **Example Output** includes real output from the server for better clarity.
+Feel free to explore, modify, and extend this project. Contributions and feedback are welcome!
+
+---
+
+### How to Contribute
+
+1. **Fork the Repository**: Create your own fork of the project.
+
+2. **Clone the Fork**:
+
+   ```bash
+   git clone https://github.com/your-username/dns-server-python.git
+   ```
+
+3. **Create a New Branch**:
+
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+4. **Make Changes**: Implement your feature or bug fix.
+
+5. **Commit Changes**:
+
+   ```bash
+   git add .
+   git commit -m "Describe your changes"
+   ```
+
+6. **Push to Your Fork**:
+
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+7. **Create a Pull Request**: Submit a pull request to the original repository.
+
+---
+
+### License
+
+This project is open-source and available under the MIT License.
