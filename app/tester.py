@@ -1,88 +1,184 @@
 import socket
 import struct
+import unittest
 import threading
 import time
-import concurrent.futures
-import argparse
 
-def send_dns_query(domain_name, server_address=('127.0.0.1', 2053), packet_id=1234):
-    query = build_dns_query(domain_name, packet_id)
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(2)
-    try:
-        client_socket.sendto(query, server_address)
-        response, _ = client_socket.recvfrom(512)
-        # Optionally parse and validate the response
-        return True  # Indicate success
-    except socket.timeout:
-        print(f"Timeout for domain: {domain_name}")
-        return False  # Indicate failure
-    except Exception as e:
-        print(f"Error sending query for {domain_name}: {e}")
-        return False
-    finally:
-        client_socket.close()
+class TestDNSServer(unittest.TestCase):
 
-def build_dns_query(domain_name, packet_id):
-    encoded_name = encode_domain_name(domain_name)
-    flags = 0x0100  # Standard query
-    qdcount = 1
-    ancount = 0
-    nscount = 0
-    arcount = 0
-    header = struct.pack("!HHHHHH", packet_id, flags, qdcount, ancount, nscount, arcount)
-    question = encoded_name + struct.pack("!HH", 1, 1)
-    return header + question
+    @classmethod
+    def setUpClass(cls):
+        # Import your DNS server code here
+        from main import run_dns_server
 
-def encode_domain_name(domain_name):
-    parts = domain_name.split('.')
-    encoded_name = b''
-    for part in parts:
-        encoded_name += bytes([len(part)]) + part.encode('ascii')
-    encoded_name += b'\x00'
-    return encoded_name
+        # Start the DNS server in a separate thread
+        cls.server_thread = threading.Thread(target=run_dns_server, daemon=True)
+        cls.server_thread.start()
+        time.sleep(1)  # Give the server time to start
 
-def run_load_test(domain_names, total_requests, max_workers=100):
-    start_time = time.time()
-    successes = 0
-    failures = 0
+    def send_dns_query(self, domain_name, record_type=1, packet_id=1234):
+        query = self.build_dns_query(domain_name, record_type, packet_id)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client_socket.settimeout(2)
+        try:
+            client_socket.sendto(query, ('127.0.0.1', 2053))
+            response, _ = client_socket.recvfrom(512)
+            return response
+        except socket.timeout:
+            self.fail(f"Timeout waiting for response from DNS server for domain {domain_name}")
+        finally:
+            client_socket.close()
 
-    def task(domain, packet_id):
-        success = send_dns_query(domain, packet_id=packet_id)
-        return success
+    def build_dns_query(self, domain_name, record_type, packet_id):
+        encoded_name = self.encode_domain_name(domain_name)
+        flags = 0x0100  # Standard query
+        qdcount = 1
+        ancount = 0
+        nscount = 0
+        arcount = 0
+        header = struct.pack("!HHHHHH", packet_id, flags, qdcount, ancount, nscount, arcount)
+        question = encoded_name + struct.pack("!HH", record_type, 1)  # Type, Class
+        return header + question
 
-    # Use ThreadPoolExecutor to manage threads efficiently
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = []
-        for i in range(total_requests):
-            domain = domain_names[i % len(domain_names)]
-            packet_id = 1000 + i  # Ensure unique packet IDs
-            futures.append(executor.submit(task, domain, packet_id))
+    def encode_domain_name(self, domain_name):
+        parts = domain_name.split('.')
+        encoded_name = b''
+        for part in parts:
+            encoded_name += bytes([len(part)]) + part.encode('ascii')
+        encoded_name += b'\x00'
+        return encoded_name
 
-        # As futures complete, tally the results
-        for future in concurrent.futures.as_completed(futures):
-            if future.result():
-                successes += 1
+    def decode_domain_name(self, data, offset):
+        labels = []
+        while True:
+            length = data[offset]
+            if length == 0:
+                offset += 1
+                break
+            elif (length & 0xC0) == 0xC0:
+                # Pointer encountered
+                pointer = struct.unpack("!H", data[offset:offset+2])[0]
+                pointer &= 0x3FFF  # Mask the first two bits
+                _, name = self.decode_domain_name(data, pointer)
+                labels.append(name)
+                offset += 2
+                break
             else:
-                failures += 1
+                offset += 1
+                labels.append(data[offset:offset+length].decode('ascii'))
+                offset += length
+        domain_name = '.'.join(labels)
+        return offset, domain_name
 
-    end_time = time.time()
-    duration = end_time - start_time
-    print(f"Total requests: {total_requests}")
-    print(f"Successful responses: {successes}")
-    print(f"Failed responses: {failures}")
-    print(f"Total time: {duration:.2f} seconds")
-    print(f"Requests per second: {total_requests / duration:.2f}")
+    def parse_response(self, response):
+        header = struct.unpack("!HHHHHH", response[:12])
+        packet_id, flags, qdcount, ancount, nscount, arcount = header
 
-if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="DNS Server Load Tester")
-    parser.add_argument('--requests', type=int, default=1000, help='Total number of DNS queries to send')
-    parser.add_argument('--workers', type=int, default=100, help='Maximum number of worker threads')
-    args = parser.parse_args()
+        offset = 12
 
-    # List of domain names to test
-    domain_names = ['example.com', 'codecrafters.io', 'test.com', 'mydomain.net', 'random.org']
+        # Parse Question Section
+        for _ in range(qdcount):
+            offset, domain_name = self.decode_domain_name(response, offset)
+            qtype, qclass = struct.unpack("!HH", response[offset:offset+4])
+            offset += 4
 
-    # Run the load test
-    run_load_test(domain_names, args.requests, args.workers)
+        # Parse Answer Section
+        answers = []
+        for _ in range(ancount):
+            offset, name = self.decode_domain_name(response, offset)
+            atype, aclass, attl, ardlength = struct.unpack("!HHIH", response[offset:offset+10])
+            offset += 10
+            rdata = response[offset:offset+ardlength]
+            offset += ardlength
+            answers.append({
+                'name': name,
+                'type': atype,
+                'class': aclass,
+                'ttl': attl,
+                'rdata': rdata
+            })
+
+        return {
+            'packet_id': packet_id,
+            'flags': flags,
+            'qdcount': qdcount,
+            'ancount': ancount,
+            'nscount': nscount,
+            'arcount': arcount,
+            'answers': answers
+        }
+
+    def test_known_domains(self):
+        # Domains that should be resolved
+        domain_ip_mapping = {
+            'example.com': '28.121.220.44',
+            'test.com': '28.121.220.44',
+            'helloworld.com': '28.121.220.44',
+            'random.org': '28.121.220.44'
+        }
+
+        for domain, expected_ip in domain_ip_mapping.items():
+            with self.subTest(domain=domain):
+                response = self.send_dns_query(domain)
+                parsed_response = self.parse_response(response)
+
+                # Check packet ID
+                self.assertEqual(parsed_response['packet_id'], 1234)
+
+                # Check that it's a response
+                qr = (parsed_response['flags'] >> 15) & 1
+                self.assertEqual(qr, 1)
+
+                # Check that RCODE is 0 (No error)
+                rcode = parsed_response['flags'] & 0xF
+                self.assertEqual(rcode, 0)
+
+                # Check that we have one answer
+                self.assertEqual(parsed_response['ancount'], 1)
+
+                # Validate the answer
+                answer = parsed_response['answers'][0]
+                self.assertEqual(answer['type'], 1)    # Type A
+                self.assertEqual(answer['class'], 1)   # Class IN
+                ip_address = socket.inet_ntoa(answer['rdata'])
+                self.assertEqual(ip_address, expected_ip)
+
+    def test_unknown_domain(self):
+        # Domain that should not be resolved
+        domain = 'unknown-domain.com'
+        response = self.send_dns_query(domain)
+        parsed_response = self.parse_response(response)
+
+        # Check that RCODE is 3 (Name Error)
+        rcode = parsed_response['flags'] & 0xF
+        self.assertEqual(rcode, 3)
+
+        # Check that we have zero answers
+        self.assertEqual(parsed_response['ancount'], 0)
+
+    def test_invalid_domain(self):
+        # Test with an invalid domain name
+        domain = 'invalid_domain_name'
+        response = self.send_dns_query(domain)
+        parsed_response = self.parse_response(response)
+
+        # Check that RCODE is 3 (Name Error)
+        rcode = parsed_response['flags'] & 0xF
+        self.assertEqual(rcode, 3)
+
+        # Check that we have zero answers
+        self.assertEqual(parsed_response['ancount'], 0)
+
+    def test_multiple_queries(self):
+        # Send multiple queries in rapid succession
+        domain = 'example.com'
+        num_queries = 100
+        for i in range(num_queries):
+            with self.subTest(i=i):
+                response = self.send_dns_query(domain, packet_id=1000 + i)
+                parsed_response = self.parse_response(response)
+                self.assertEqual(parsed_response['packet_id'], 1000 + i)
+                # Additional checks can be added here
+
+if __name__ == '__main__':
+    unittest.main()
