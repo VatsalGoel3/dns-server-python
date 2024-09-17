@@ -1,4 +1,3 @@
-```markdown
 # DNS Server Project
 
 This project is an implementation of a DNS server in Python. The DNS server listens for DNS queries, processes them, and sends back responses. The project is being developed incrementally, with a focus on understanding the DNS protocol and building out the various features of a functioning DNS server.
