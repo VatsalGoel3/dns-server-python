@@ -32,15 +32,27 @@ def encode_domain_name(domain_name):
     encoded_name += b'\x00'
     return encoded_name
 
+def forward_query(query):
+    upstream_server = ('8.8.8.8', 53) # Google DNS server
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.timeout(5) # Timeout incase of Upstream server not responding
+
+    try:
+        sock.sendto(upstream_server, query)
+        response, _ = sock.recvfrom(512)
+        return response
+    except socket.timeout:
+        logging.error("Timeout when contacting Upstream DNS Server.")
+        return None
+    finally:
+        sock.close
+
 def build_dns_response(query):    
     domain_name = extract_domain_name(query)
     domain_name = domain_name.lower() # Ensure domain names are handled in a case-sensitive manner
     logging.debug(f"Received query for the domain name: {domain_name}")
 
     encoded_name = encode_domain_name(domain_name)
-
-    # Calling IP address from storage
-    ip_address = domain_ip_mapping.get(domain_name, '0.0.0.0')
 
     # Building DNS header structure
     packet_id = struct.unpack("!H", query[:2])[0]  # Extract packet ID from query
@@ -61,7 +73,7 @@ def build_dns_response(query):
 
     # Questions and records section
     qdcount = 1
-    ancount = 0 # Updating to 1 as now client would recieve one answer
+    ancount = 1 
     nscount = 0
     arcount = 0
 
