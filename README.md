@@ -162,6 +162,21 @@ OK
 - Recursive queries are not supported; the server does not forward requests it cannot answer.
 - Domain names are case-insensitive in the current implementation.
 
+## In Progress
+
+### Recursive Query Handling
+
+- **Implemented:**
+  - Added the `forward_query` function in `main.py` to forward DNS queries to an upstream server when the domain is not found locally.
+  - This function sends the query to a specified upstream DNS server (e.g., Google DNS at `8.8.8.8`) and awaits a response.
+
+- **Next Steps:**
+  - Integrate the `forward_query` function into the main query handling logic in `build_dns_response`.
+  - Modify `build_dns_response` to forward queries when the domain is not found in the local mapping.
+  - Handle the response from the upstream server and send it back to the client.
+  - Update `tester.py` to include tests for recursive queries, ensuring proper functionality and error handling.
+  - Update logging in `main.py` to track recursive query handling.
+
 ## Future Work
 
 - **Support for Additional Record Types**:
