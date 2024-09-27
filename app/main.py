@@ -7,21 +7,41 @@ from domain_mappings import domain_ip_mapping
 # Setting up logging configuration
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def extract_domain_name(query):
-    # Your existing code
+def extract_domain_name(query, offset=12, visited_offsets=None):
+    if visited_offsets is None:
+        visited_offsets = set()
     domain_parts = []
-    i = 12
     while True:
-        if i >= len(query):
-            logging.error("Reached end of query while parasing domain name.")
-            return ''
-        length = query[i]
+        if offset in visited_offsets:
+            # Prevent malformed packets to cause loops
+            logging.error("Loop detected in domain name compression")
+            return [], offset
+        visited_offsets.add(offset)
+
+        if offset >= len(query):
+            logging.error("Reached end of query while parsing domain name")
+            return [], offset
+        
+        length = query[offset]
+
         if length == 0:
+            offset += 1
             break
-        i += 1
-        domain_parts.append(query[i:i + length].decode('ascii'))
-        i += length
-    return '.'.join(domain_parts)
+        elif(length & 0xC0) == 0xC0:
+            # Pointer case
+            pointer = struct.unpack("!H", query[offset:offset+2])[0] & 0x3FFF
+            offset += 2
+            # Recursive call to handle the pointer
+            labels,_ = extract_domain_name(query, offset, visited_offsets)
+            domain_parts.extend(labels)
+            break
+        else:
+            offset += 1
+            label = query[offset:offset+length].decode('ascii')
+            domain_parts.append(label)
+            offset += length
+
+    return domain_parts, offset
 
 def encode_domain_name(domain_name):
     # Your existing code
@@ -48,10 +68,9 @@ def forward_query(query):
         sock.close()
 
 def build_dns_response(query):    
-    domain_name = extract_domain_name(query)
-    domain_name = domain_name.lower() # Ensure domain names are handled in a case-sensitive manner
+    domain_parts, offset = extract_domain_name(query)
+    domain_name = '.'.join(domain_parts).lower()
     logging.debug(f"Received query for the domain name: {domain_name}")
-
     encoded_name = encode_domain_name(domain_name)
 
     # Building DNS header structure
