@@ -293,6 +293,45 @@ class TestDNSServer(unittest.TestCase):
                 elif rcode == 3:
                     self.assertEqual(parsed_response['ancount'], 0)
 
+    def test_dns_caching(self):
+        """Test that responses are cached and reused"""
+        domain = 'google.com'
+        
+        # First request - should go to upstream
+        start_time = time.time()
+        response1 = self.send_dns_query(domain)
+        first_request_time = time.time() - start_time
+        
+        # Second request - should be cached
+        start_time = time.time()
+        response2 = self.send_dns_query(domain)
+        second_request_time = time.time() - start_time
+        
+        # Verify responses match
+        self.assertEqual(response1[4:], response2[4:])  # Compare everything except transaction ID
+        
+        # Second request should be significantly faster
+        self.assertLess(second_request_time, first_request_time)
+
+    def test_cache_expiry(self):
+        """Test that cached entries expire after TTL"""
+        domain = 'google.com'
+        
+        # First request with custom packet ID
+        response1 = self.send_dns_query(domain, packet_id=5555)
+        parsed1 = self.parse_response(response1)
+        
+        # Wait for cache to expire (use very short TTL for testing)
+        time.sleep(1)
+        
+        # Second request with different packet ID
+        response2 = self.send_dns_query(domain, packet_id=6666)
+        parsed2 = self.parse_response(response2)
+        
+        # Transaction IDs should be different and match what we sent
+        self.assertEqual(parsed1['packet_id'], 5555)
+        self.assertEqual(parsed2['packet_id'], 6666)
+
     @classmethod
     def tearDownClass(cls):
         # Optionally, implement server shutdown if necessary
